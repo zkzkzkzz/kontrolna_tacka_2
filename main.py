@@ -58,6 +58,48 @@ def create_target(final_result):
 # Kreiranje targeta
 df['target'] = df['final_result'].apply(create_target)
 
+# ============================================
+# FILTRIRANJE STUDENATA KOJI SU SE RANO ISPISALI
+# ============================================
+
+TIME_WINDOW=15
+print("\n" + "=" * 60)
+print("FILTRIRANJE PODATAKA - RANI ISPISI")
+print("=" * 60)
+
+# Učitaj studentRegistration
+student_registration = pd.read_csv('studentRegistration.csv')
+
+# Filtriraj za naš kurs
+registration_filtered = student_registration[
+    (student_registration['code_module'] == SELECTED_COURSE) &
+    (student_registration['code_presentation'] == SELECTED_PRESENTATION)
+].copy()
+
+print(f"\nRegistracioni podaci: {registration_filtered.shape[0]} zapisa")
+
+# Identifikuj studente koji su se ISPISALI RANO (pre 15. dana)
+early_withdrawals = registration_filtered[
+    (registration_filtered['date_unregistration'].notna()) &  # Ima datum ispisa
+    (registration_filtered['date_unregistration'] <= TIME_WINDOW)  # Ispisao se pre 15. dana
+]['id_student'].unique()
+
+print(f"\nStudenti sa ranim ispisom (pre {TIME_WINDOW} dana): {len(early_withdrawals)}")
+
+# ISKLJUČI te studente iz dataseta
+print(f"\nBroj studenata PRE filtriranja: {len(df)}")
+
+df = df[~df['id_student'].isin(early_withdrawals)].copy()
+
+print(f"Broj studenata POSLE filtriranja: {len(df)}")
+print(f"Isključeno: {len(early_withdrawals)} studenata")
+
+# Ažuriraj target distribuciju
+print(f"\nNova target distribucija:")
+print(df['final_result'].value_counts())
+print(f"\nTarget (0/1):")
+print(df['target'].value_counts())
+
 
 # Proveri da li imaš dovoljno obe klase
 class_balance = df['target'].value_counts(normalize=True)
@@ -122,7 +164,7 @@ print(y_test.value_counts())
 
 # 2.2: Decision Tree model
 
-# kreiranje modela model
+# kreiranje modela
 dt_model = DecisionTreeClassifier(
     random_state=42,
     max_depth=5,  # Ograniči dubinu stabla
@@ -521,7 +563,7 @@ print(f"    └─ VLE behavior: ~{X_full.shape[1] - 30}")
 
 # FAZA 4
 
-print('FAZA 4')
+print('FAZA 4 - treniranje i testiranje sa Demo + VLE')
 
 # 4.1: Split podataka
 
@@ -556,6 +598,8 @@ precision_dt_full = precision_score(y_test_full, y_pred_dt_full)
 recall_dt_full = recall_score(y_test_full, y_pred_dt_full)
 f1_dt_full = f1_score(y_test_full, y_pred_dt_full)
 auc_dt_full = roc_auc_score(y_test_full, y_pred_proba_dt_full)
+
+print('DECISION TREE - rezultati (sa VLE)')
 
 print(f"\nAccuracy:  {accuracy_dt_full:.3f} ({accuracy_dt_full*100:.1f}%)")
 print(f"Precision: {precision_dt_full:.3f}")
@@ -602,6 +646,8 @@ precision_lr_full = precision_score(y_test_full, y_pred_lr_full)
 recall_lr_full = recall_score(y_test_full, y_pred_lr_full)
 f1_lr_full = f1_score(y_test_full, y_pred_lr_full)
 auc_lr_full = roc_auc_score(y_test_full, y_pred_proba_lr_full)
+
+print('LOGISTIC REGRESSION - rezultati (sa VLE)')
 
 print(f"\nAccuracy:  {accuracy_lr_full:.3f} ({accuracy_lr_full*100:.1f}%)")
 print(f"Precision: {precision_lr_full:.3f}")
@@ -715,7 +761,7 @@ print(" Default threshold = 0.5 (50% verovatnoća)")
 
 # 5.1: Analiza različitih threshold-a
 
-# Koristićemo Logistic Regression
+# Koristim Logistic Regression
 # y_pred_proba_lr_full već imamo (verovatnoće)
 
 thresholds_to_test = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
@@ -877,17 +923,18 @@ print("FAZA 6: KLASTEROVANJE - GRUPISANJE STUDENATA")
 # samo studente sa VLE aktivnostima
 
 # Identifikovanje studenata sa VLE
-students_with_activity = df_full[df_full['total_clicks'] > 0]['id_student'].values
-
-# Filtriranje X_full i y_full
-X_cluster = X_full[df_full_encoded['id_student'].isin(students_with_activity)].copy()
-y_cluster = y_full[df_full_encoded['id_student'].isin(students_with_activity)].copy()
-ids_cluster = df_full_encoded[df_full_encoded['id_student'].isin(students_with_activity)]['id_student'].values
+# Zadržavamo sve studente (i one bez VLE)
+X_cluster = X_full.copy()
+y_cluster = y_full.copy()
+ids_cluster = df_full_encoded['id_student'].values
 
 print(f"\n✓ Podaci za klasterovanje:")
 print(f"  Broj studenata: {len(X_cluster)}")
 print(f"  Broj feature-a: {X_cluster.shape[1]}")
-print(f"  Studenti sa VLE aktivnošću: {len(students_with_activity)}")
+
+students_with_vle_activity = (df_full_encoded['total_clicks'] > 0).sum()
+print(f"  Studenti sa VLE aktivnošću: {students_with_vle_activity}")
+print(f"  Studenti BEZ VLE aktivnosti: {len(X_cluster) - students_with_vle_activity}")
 
 # Izdvoji samo VLE feature-e za klasterovanje
 # (demografija je manje važna za grupisanje ponašanja)
@@ -1203,3 +1250,53 @@ ax.grid(True, axis='y', alpha=0.3)
 
 plt.tight_layout()
 plt.show()
+
+# ============================================
+# DODATNA ANALIZA: Studenti BEZ VLE aktivnosti
+# ============================================
+
+print("\n" + "=" * 60)
+print("ANALIZA: STUDENTI BEZ VLE AKTIVNOSTI")
+print("=" * 60)
+
+students_no_vle = df_full_encoded[df_full_encoded['total_clicks'] == 0]['id_student'].values
+
+print(f"\nBroj studenata BEZ VLE aktivnosti: {len(students_no_vle)}")
+print(f"Procenat: {len(students_no_vle) / len(df_full_encoded) * 100:.1f}%")
+
+# Analiza njihovih ishoda
+df_no_vle = df_full_encoded[df_full_encoded['id_student'].isin(students_no_vle)]
+
+print(f"\nIshodi studenata BEZ VLE aktivnosti:")
+print(df_no_vle['target'].value_counts())
+print(f"\nProcenat:")
+risk_rate_no_vle = (df_no_vle['target'] == 1).mean()
+print(f"  U riziku (1): {risk_rate_no_vle * 100:.1f}%")
+print(f"  Uspešni (0): {(1 - risk_rate_no_vle) * 100:.1f}%")
+
+print("\n ZAKLJUČAK:")
+if risk_rate_no_vle > 0.7:
+    print(f"  Većina studenata bez VLE aktivnosti ({risk_rate_no_vle*100:.0f}%) je u riziku.")
+    print("  To potvrđuje da je VLE aktivnost važan prediktor.")
+elif risk_rate_no_vle < 0.5:
+    print(f"  Manje od polovine ({risk_rate_no_vle*100:.0f}%) studenata bez VLE je u riziku!")
+    print("  To znači da neki studenti NE TREBAJU VLE da bi prošli (offline učenje).")
+    print("  Profesor je imao pravo - ne treba isključivati ove studente!")
+else:
+    print(f"  Oko {risk_rate_no_vle*100:.0f}% studenata bez VLE je u riziku.")
+    print("  Odsustvo VLE aktivnosti je signal rizika, ali ne i garancija pada.")
+
+# Demografske karakteristike studenata bez VLE
+print("\n Demografske karakteristike (Top 5):")
+
+# Top 5 najčešćih vrednosti za nekoliko ključnih feature-a
+key_features = ['num_of_prev_attempts', 'studied_credits']
+
+for feat in key_features:
+    if feat in df_full.columns:
+        print(f"\n  {feat}:")
+        top_values = df_full[df_full['id_student'].isin(students_no_vle)][feat].value_counts().head(3)
+        for val, count in top_values.items():
+            print(f"    {val}: {count} studenata ({count/len(students_no_vle)*100:.1f}%)")
+
+print("\n" + "=" * 60)
